@@ -234,7 +234,9 @@ function loadUiState() {
     detailCollapsed: mobile
   };
   try {
-    return { ...defaults, ...JSON.parse(localStorage.getItem(UI_STATE_KEY)) };
+    const loaded = { ...defaults, ...JSON.parse(localStorage.getItem(UI_STATE_KEY)) };
+    if (loaded.sidebarCollapsed) loaded.filtersCollapsed = true;
+    return loaded;
   } catch {
     return defaults;
   }
@@ -245,12 +247,13 @@ function persistUiState() {
 }
 
 function applyUiState() {
+  if (uiState.sidebarCollapsed) uiState.filtersCollapsed = true;
   document.body.classList.toggle("is-sidebar-collapsed", uiState.sidebarCollapsed);
   document.body.classList.toggle("is-filters-collapsed", uiState.filtersCollapsed);
   document.body.classList.toggle("is-detail-collapsed", uiState.detailCollapsed);
 
-  els.sidebarToggle?.setAttribute("aria-label", uiState.sidebarCollapsed ? "一覧を開く" : "一覧を畳む");
-  els.sidebarToggle?.setAttribute("title", uiState.sidebarCollapsed ? "一覧を開く" : "一覧を畳む");
+  els.sidebarToggle?.setAttribute("aria-label", uiState.sidebarCollapsed ? "検索部を開く" : "検索部を畳む");
+  els.sidebarToggle?.setAttribute("title", uiState.sidebarCollapsed ? "検索部を開く" : "検索部を畳む");
   els.sidebarToggle?.querySelector("i")?.setAttribute("data-lucide", uiState.sidebarCollapsed ? "panel-left-open" : "panel-left-close");
 
   els.filtersToggle?.setAttribute("aria-expanded", String(!uiState.filtersCollapsed));
@@ -266,6 +269,7 @@ function applyUiState() {
 
 function setUiState(nextState) {
   Object.assign(uiState, nextState);
+  if (uiState.sidebarCollapsed) uiState.filtersCollapsed = true;
   persistUiState();
   applyUiState();
 }
