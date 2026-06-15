@@ -53,17 +53,27 @@ let visibleListCount = LIST_RENDER_BATCH;
 let detailDataByDataset = new Map();
 let detailLoadPromises = new Map();
 let detailLoadFailures = new Set();
+let pendingUrlGenre = null;
+let pendingUrlPrefecture = null;
+let pendingUrlLocality = null;
+let userLocation = null;
+let mobileView = "search";
 
 const els = {
   searchInput: document.querySelector("#searchInput"),
+  genreFilter: document.querySelector("#genreFilter"),
   datasetSelect: document.querySelector("#datasetSelect"),
   prefectureFilter: document.querySelector("#prefectureFilter"),
   localityFilter: document.querySelector("#localityFilter"),
+  accuracyFilter: document.querySelector("#accuracyFilter"),
   sortSelect: document.querySelector("#sortSelect"),
   shopList: document.querySelector("#shopList"),
   shopDetail: document.querySelector("#shopDetail"),
   resultCount: document.querySelector("#resultCount"),
   datasetLabel: document.querySelector("#datasetLabel"),
+  filterSummary: document.querySelector("#filterSummary"),
+  mapNotice: document.querySelector("#mapNotice"),
+  shareButton: document.querySelector("#shareButton"),
   importButton: document.querySelector("#importButton"),
   resetButton: document.querySelector("#resetButton"),
   importDialog: document.querySelector("#importDialog"),
@@ -71,7 +81,8 @@ const els = {
   applyImportButton: document.querySelector("#applyImportButton"),
   sidebarToggle: document.querySelector("#sidebarToggle"),
   filtersToggle: document.querySelector("#filtersToggle"),
-  detailToggle: document.querySelector("#detailToggle")
+  detailToggle: document.querySelector("#detailToggle"),
+  mobileTabs: document.querySelectorAll("[data-mobile-view]")
 };
 
 applyInitialUrlState();
@@ -169,13 +180,19 @@ function getUrlParam(key) {
 function applyInitialUrlState() {
   const params = getUrlParams();
   const query = params.get("q");
+  const genre = params.get("genre");
   const prefecture = params.get("pref");
   const locality = params.get("area");
+  const accuracy = params.get("accuracy");
   const sort = params.get("sort");
 
   if (query) els.searchInput.value = query;
-  if (prefecture) els.prefectureFilter.value = prefecture;
-  if (locality) els.localityFilter.value = locality;
+  if (genre) pendingUrlGenre = genre;
+  if (prefecture) pendingUrlPrefecture = prefecture;
+  if (locality) pendingUrlLocality = locality;
+  if (accuracy && [...(els.accuracyFilter.options ?? [])].some((option) => option.value === accuracy)) {
+    els.accuracyFilter.value = accuracy;
+  }
   if (sort && [...(els.sortSelect.options ?? [])].some((option) => option.value === sort)) {
     els.sortSelect.value = sort;
   }
@@ -195,8 +212,10 @@ function updateUrlState() {
   const params = new URLSearchParams();
   setUrlParam(params, "dataset", activeDatasetId !== ALL_DATASETS_ID ? activeDatasetId : "");
   setUrlParam(params, "q", els.searchInput.value.trim());
+  setUrlParam(params, "genre", els.genreFilter.value !== "all" ? els.genreFilter.value : "");
   setUrlParam(params, "pref", els.prefectureFilter.value !== "all" ? els.prefectureFilter.value : "");
   setUrlParam(params, "area", els.localityFilter.value !== "all" ? els.localityFilter.value : "");
+  setUrlParam(params, "accuracy", els.accuracyFilter.value !== "all" ? els.accuracyFilter.value : "");
   setUrlParam(params, "sort", els.sortSelect.value !== "rank" ? els.sortSelect.value : "");
   setUrlParam(params, "shop", selectedId && selectedId !== shops[0]?.id ? selectedId : "");
 
@@ -457,10 +476,20 @@ function getLinks(shop) {
   };
 }
 
+function normalizeSearchText(value) {
+  return String(value ?? "")
+    .normalize("NFKC")
+    .toLowerCase()
+    .replace(/[ぁ-ん]/g, (char) => String.fromCharCode(char.charCodeAt(0) + 0x60))
+    .replace(/\s+/g, "");
+}
+
 function getFilteredShops() {
-  const search = els.searchInput.value.trim().toLowerCase();
+  const search = normalizeSearchText(els.searchInput.value);
+  const genre = els.genreFilter.value;
   const prefecture = els.prefectureFilter.value;
   const locality = els.localityFilter.value;
+  const accuracy = els.accuracyFilter.value;
   const sort = els.sortSelect.value;
 
   const filtered = shops.filter((shop) => {
@@ -482,15 +511,23 @@ function getFilteredShops() {
       shop.description,
       shop.note,
       state.memo
-    ].join(" ").toLowerCase();
-    const matchesSearch = !search || haystack.includes(search);
+    ].join(" ");
+    const normalizedHaystack = normalizeSearchText(haystack);
+    const matchesSearch = !search || normalizedHaystack.includes(search);
+    const matchesGenre = genre === "all" || shop.genre === genre;
     const matchesPrefecture = prefecture === "all" || shop.prefecture === prefecture;
     const matchesLocality = locality === "all" || matchesLocalityFilter(shop, locality);
-    return matchesSearch && matchesPrefecture && matchesLocality;
+    const matchesAccuracy = accuracy === "all" || getAccuracyBucket(shop) === accuracy;
+    return matchesSearch && matchesGenre && matchesPrefecture && matchesLocality && matchesAccuracy;
   });
 
   return filtered.sort((a, b) => {
     if (sort === "name") return a.name.localeCompare(b.name, "ja");
+    if (sort === "distance" && userLocation) {
+      return getDistanceFromUser(a) - getDistanceFromUser(b)
+        || a.datasetLabel.localeCompare(b.datasetLabel, "ja")
+        || a.rank - b.rank;
+    }
     if (sort === "area") {
       return getPrefectureOrder(a.prefecture) - getPrefectureOrder(b.prefecture)
         || getAreaLabel(a).localeCompare(getAreaLabel(b), "ja")
@@ -499,6 +536,27 @@ function getFilteredShops() {
     }
     return a.datasetLabel.localeCompare(b.datasetLabel, "ja") || a.rank - b.rank;
   });
+}
+
+function getAccuracyBucket(shop) {
+  if (!isValidCoordinatePair(shop.lat, shop.lng) || String(shop.locationAccuracy).includes("未取得")) return "missing";
+  if (String(shop.locationAccuracy).includes("地域代表点")) return "regional";
+  return "precise";
+}
+
+function getDistanceFromUser(shop) {
+  if (!userLocation || !isValidCoordinatePair(shop.lat, shop.lng)) return Number.POSITIVE_INFINITY;
+  return getDistanceKm(userLocation.lat, userLocation.lng, shop.lat, shop.lng);
+}
+
+function getDistanceKm(lat1, lng1, lat2, lng2) {
+  const toRad = (degree) => degree * Math.PI / 180;
+  const earthRadiusKm = 6371;
+  const dLat = toRad(lat2 - lat1);
+  const dLng = toRad(lng2 - lng1);
+  const a = Math.sin(dLat / 2) ** 2
+    + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
+  return earthRadiusKm * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
 function getPrefectureOrder(prefecture) {
@@ -531,8 +589,8 @@ function getAreaLabel(shop) {
 }
 
 function renderAreaOptions() {
-  const currentPrefecture = els.prefectureFilter.value || "all";
-  const currentLocality = els.localityFilter.value || "all";
+  const currentPrefecture = pendingUrlPrefecture || els.prefectureFilter.value || "all";
+  const currentLocality = pendingUrlLocality || els.localityFilter.value || "all";
   const prefectures = [...new Set(shops.map((shop) => shop.prefecture).filter(Boolean))]
     .sort((a, b) => getPrefectureOrder(a) - getPrefectureOrder(b));
 
@@ -550,6 +608,8 @@ function renderAreaOptions() {
     ...localityOptions.map((option) => `<option value="${escapeHtml(option.value)}">${escapeHtml(option.label)}</option>`)
   ].join("");
   els.localityFilter.value = localityOptions.some((option) => option.value === currentLocality) ? currentLocality : "all";
+  pendingUrlPrefecture = null;
+  pendingUrlLocality = null;
 }
 
 function getLocalityOptions(selectedPrefecture) {
@@ -603,6 +663,43 @@ function renderDatasetOptions() {
   els.datasetSelect.value = activeDatasetId;
 }
 
+function renderGenreOptions() {
+  const currentGenre = pendingUrlGenre || els.genreFilter.value || "all";
+  const genres = [...new Set(shops.map((shop) => shop.genre).filter(Boolean))]
+    .sort((a, b) => a.localeCompare(b, "ja"));
+  els.genreFilter.innerHTML = [
+    '<option value="all">全ジャンル</option>',
+    ...genres.map((genre) => `<option value="${escapeHtml(genre)}">${escapeHtml(genre)}</option>`)
+  ].join("");
+  els.genreFilter.value = genres.includes(currentGenre) ? currentGenre : "all";
+  pendingUrlGenre = null;
+}
+
+function updateFilterSummary(filteredCount) {
+  const parts = [];
+  const query = els.searchInput.value.trim();
+  const genre = els.genreFilter.value;
+  const pref = els.prefectureFilter.value;
+  const area = els.localityFilter.value;
+  const accuracy = els.accuracyFilter.value;
+  const sort = els.sortSelect.selectedOptions?.[0]?.textContent || "";
+
+  if (query) parts.push(`検索: ${query}`);
+  if (genre !== "all") parts.push(genre);
+  if (pref !== "all") parts.push(pref);
+  if (area !== "all") parts.push(getLocalityOptionLabel(area));
+  if (accuracy !== "all") parts.push(`地図精度: ${els.accuracyFilter.selectedOptions?.[0]?.textContent || accuracy}`);
+  if (els.sortSelect.value !== "rank") parts.push(`並び: ${sort}`);
+
+  els.filterSummary.textContent = parts.length
+    ? `${parts.join(" / ")} / ${filteredCount}件`
+    : `条件なし / ${filteredCount}件`;
+}
+
+function getLocalityOptionLabel(value) {
+  return [...(els.localityFilter.options ?? [])].find((option) => option.value === value)?.textContent || value;
+}
+
 function renderList(filtered) {
   els.resultCount.textContent = `${filtered.length}件`;
   els.datasetLabel.textContent = activeDatasetId === ALL_DATASETS_ID
@@ -651,6 +748,10 @@ function renderMap(filtered, options = {}) {
 
   const valid = filtered.filter((shop) => isValidCoordinatePair(shop.lat, shop.lng));
   const visible = valid.length > MAX_VISIBLE_MARKERS ? [] : valid;
+  els.mapNotice.hidden = valid.length <= MAX_VISIBLE_MARKERS;
+  els.mapNotice.textContent = valid.length > MAX_VISIBLE_MARKERS
+    ? `${MAX_VISIBLE_MARKERS}件以下に絞るとピンを表示します。現在 ${valid.length}件です。`
+    : "";
 
   visible.forEach((shop) => {
     const marker = L.marker([shop.lat, shop.lng], {
@@ -662,7 +763,7 @@ function renderMap(filtered, options = {}) {
       ${shop.address ? `${escapeHtml(shop.address)}<br>` : ""}
       ${shop.closed ? `定休日: ${escapeHtml(shop.closed)}` : ""}
     `);
-    marker.on("click", () => selectShop(shop.id));
+    marker.on("click", () => selectShop(shop.id, { mobileView: "detail" }));
     markers.set(shop.id, marker);
   });
 
@@ -802,15 +903,15 @@ function renderDetail() {
       <span class="rank">${view.rank}</span>
     </div>
 
-    ${factsHtml ? `<dl class="shop-facts">${factsHtml}</dl>` : ""}
-
     <div class="detail-actions">
-      ${links.tabelog ? linkButton(links.tabelog, "external-link", "食べログ") : ""}
+      ${links.tabelog ? linkButton(links.tabelog, "external-link", "食べログ", true) : ""}
       ${linkButton(links.googleMaps, "map-pin", "Google Maps")}
       ${linkButton(links.googleReviews, "search", "Googleクチコミ")}
       ${linkButton(links.instagram, "instagram", "Instagram")}
       ${links.x ? linkButton(links.x, "message-circle", "X") : ""}
     </div>
+
+    ${factsHtml ? `<dl class="shop-facts">${factsHtml}</dl>` : ""}
 
     ${isDetailPending ? `<p class="shop-description">詳細情報を読み込み中です。最新情報は食べログで確認してください。</p>` : ""}
     ${view.description ? `<p class="shop-description">${escapeHtml(compactText(view.description))}</p>` : ""}
@@ -864,9 +965,9 @@ function ensureDetailsLoaded(shop) {
   detailLoadPromises.set(shop.datasetId, promise);
 }
 
-function linkButton(href, icon, label) {
+function linkButton(href, icon, label, primary = false) {
   return `
-    <a class="link-button" href="${href}" target="_blank" rel="noopener noreferrer">
+    <a class="link-button ${primary ? "is-primary" : ""}" href="${href}" target="_blank" rel="noopener noreferrer">
       <i data-lucide="${icon}"></i>
       ${label}
     </a>
@@ -881,6 +982,7 @@ function compactText(value, maxLength = 160) {
 function render(options = {}) {
   if (options.resetList) resetListWindow();
   renderDatasetOptions();
+  renderGenreOptions();
   renderAreaOptions();
   const filtered = getFilteredShops();
   if (!filtered.some((shop) => shop.id === selectedId)) {
@@ -889,6 +991,7 @@ function render(options = {}) {
   renderList(filtered);
   renderMap(filtered, { forceFit: options.forceFit });
   renderDetail();
+  updateFilterSummary(filtered.length);
   updateUrlState();
   refreshIcons();
 }
@@ -900,7 +1003,9 @@ function selectShop(shopId, options = {}) {
   renderList(filtered);
   renderDetail();
   updateMarkerIcons();
+  scrollSelectedCardIntoView();
   if (options.focusMap) focusSelectedMarker();
+  if (options.mobileView) setMobileView(options.mobileView);
   updateUrlState();
 }
 
@@ -917,6 +1022,13 @@ function ensureSelectedListItemVisible(filtered) {
   if (index >= visibleListCount) {
     visibleListCount = Math.ceil((index + 1) / LIST_RENDER_BATCH) * LIST_RENDER_BATCH;
   }
+}
+
+function scrollSelectedCardIntoView() {
+  requestAnimationFrame(() => {
+    const card = els.shopList.querySelector(`[data-shop-id="${CSS.escape(selectedId ?? "")}"]`);
+    card?.scrollIntoView({ block: "nearest" });
+  });
 }
 
 function parseCsv(text) {
@@ -973,6 +1085,59 @@ function refreshIcons() {
   }
 }
 
+function setMobileView(view) {
+  mobileView = ["search", "map", "detail"].includes(view) ? view : "search";
+  document.body.classList.toggle("mobile-view-search", mobileView === "search");
+  document.body.classList.toggle("mobile-view-map", mobileView === "map");
+  document.body.classList.toggle("mobile-view-detail", mobileView === "detail");
+  els.mobileTabs.forEach((button) => {
+    const isActive = button.dataset.mobileView === mobileView;
+    button.classList.toggle("is-active", isActive);
+    button.setAttribute("aria-current", isActive ? "page" : "false");
+  });
+  requestAnimationFrame(() => map.invalidateSize());
+}
+
+function ensureUserLocationForDistance() {
+  if (els.sortSelect.value !== "distance" || userLocation) return;
+  if (!navigator.geolocation) {
+    els.sortSelect.value = "rank";
+    return;
+  }
+  navigator.geolocation.getCurrentPosition(
+    (position) => {
+      userLocation = {
+        lat: position.coords.latitude,
+        lng: position.coords.longitude
+      };
+      render({ resetList: true });
+    },
+    () => {
+      els.sortSelect.value = "rank";
+      render({ resetList: true });
+    },
+    { enableHighAccuracy: false, timeout: 8000, maximumAge: 300000 }
+  );
+}
+
+async function copyCurrentUrl() {
+  updateUrlState();
+  const url = window.location.href;
+  try {
+    await navigator.clipboard.writeText(url);
+    els.shareButton.setAttribute("title", "コピーしました");
+    els.shareButton.setAttribute("aria-label", "コピーしました");
+    setTimeout(() => {
+      els.shareButton.setAttribute("title", "表示中のURLをコピー");
+      els.shareButton.setAttribute("aria-label", "表示中のURLをコピー");
+    }, 1400);
+  } catch {
+    window.prompt("URLをコピーしてください", url);
+  }
+}
+
+setMobileView(mobileView);
+
 els.sidebarToggle.addEventListener("click", () => {
   setUiState({ sidebarCollapsed: !uiState.sidebarCollapsed });
 });
@@ -986,6 +1151,7 @@ els.detailToggle.addEventListener("click", () => {
 });
 
 els.searchInput.addEventListener("input", () => render({ resetList: true }));
+els.genreFilter.addEventListener("change", () => render({ forceFit: true, resetList: true }));
 els.datasetSelect.addEventListener("change", () => {
   activeDatasetId = els.datasetSelect.value;
   localStorage.setItem(ACTIVE_DATASET_KEY, activeDatasetId);
@@ -1001,7 +1167,15 @@ els.prefectureFilter.addEventListener("change", () => {
   render({ forceFit: true, resetList: true });
 });
 els.localityFilter.addEventListener("change", () => render({ forceFit: true, resetList: true }));
-els.sortSelect.addEventListener("change", () => render({ resetList: true }));
+els.accuracyFilter.addEventListener("change", () => render({ forceFit: true, resetList: true }));
+els.sortSelect.addEventListener("change", () => {
+  ensureUserLocationForDistance();
+  render({ resetList: true });
+});
+els.shareButton.addEventListener("click", copyCurrentUrl);
+els.mobileTabs.forEach((button) => {
+  button.addEventListener("click", () => setMobileView(button.dataset.mobileView));
+});
 
 els.shopList.addEventListener("click", (event) => {
   const moreButton = event.target.closest("[data-load-more]");
@@ -1012,7 +1186,7 @@ els.shopList.addEventListener("click", (event) => {
   }
 
   const card = event.target.closest("[data-shop-id]");
-  if (card) selectShop(card.dataset.shopId, { focusMap: true });
+  if (card) selectShop(card.dataset.shopId, { focusMap: true, mobileView: "map" });
 });
 
 els.shopDetail.addEventListener("input", (event) => {

@@ -15,6 +15,9 @@
         <h1>100Shops</h1>
       </div>
       <div class="header-actions">
+        <button class="icon-button" id="shareButton" type="button" aria-label="表示中のURLをコピー" title="表示中のURLをコピー">
+          <i data-lucide="share-2"></i>
+        </button>
         <button class="icon-button" id="importButton" type="button" aria-label="CSV取り込み" title="CSV取り込み">
           <i data-lucide="upload"></i>
         </button>
@@ -47,6 +50,10 @@
 
             <div class="filter-row">
               <label>
+                <span>ジャンル</span>
+                <select id="genreFilter"></select>
+              </label>
+              <label>
                 <span>データ</span>
                 <select id="datasetSelect"></select>
               </label>
@@ -64,10 +71,21 @@
                   <option value="rank">掲載順</option>
                   <option value="name">店名</option>
                   <option value="area">エリア</option>
+                  <option value="distance">現在地から近い順</option>
+                </select>
+              </label>
+              <label>
+                <span>地図精度</span>
+                <select id="accuracyFilter">
+                  <option value="all">すべて</option>
+                  <option value="precise">店舗座標</option>
+                  <option value="regional">地域代表点</option>
+                  <option value="missing">座標未取得</option>
                 </select>
               </label>
             </div>
           </div>
+          <div class="filter-summary" id="filterSummary" aria-live="polite"></div>
         </section>
 
         <div class="list-meta">
@@ -80,6 +98,7 @@
 
       <section class="map-panel" aria-label="地図と詳細">
         <div id="map" class="map"></div>
+        <div class="map-notice" id="mapNotice" hidden></div>
         <button class="detail-toggle" id="detailToggle" type="button" aria-label="詳細を畳む" title="詳細を畳む">
           <i data-lucide="panel-right-close"></i>
           <span>詳細</span>
@@ -87,6 +106,21 @@
         <article class="detail" id="shopDetail" aria-live="polite"></article>
       </section>
     </main>
+
+    <nav class="mobile-tabs" aria-label="表示切り替え">
+      <button type="button" data-mobile-view="search" class="is-active">
+        <i data-lucide="list-filter"></i>
+        検索
+      </button>
+      <button type="button" data-mobile-view="map">
+        <i data-lucide="map"></i>
+        地図
+      </button>
+      <button type="button" data-mobile-view="detail">
+        <i data-lucide="panel-right"></i>
+        詳細
+      </button>
+    </nav>
 
     <dialog id="importDialog" class="import-dialog">
       <form method="dialog">
