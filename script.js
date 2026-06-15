@@ -1,6 +1,7 @@
 const STORAGE_KEY = "100shops.userState.v1";
 const DATA_KEY = "100shops.customData.v1";
 const ACTIVE_DATASET_KEY = "100shops.activeDataset.v1";
+const UI_STATE_KEY = "100shops.uiState.v1";
 
 const fallbackCenter = [35.6812, 139.7671];
 const SELECTED_SHOP_ZOOM = 16;
@@ -67,10 +68,14 @@ const els = {
   resetButton: document.querySelector("#resetButton"),
   importDialog: document.querySelector("#importDialog"),
   csvInput: document.querySelector("#csvInput"),
-  applyImportButton: document.querySelector("#applyImportButton")
+  applyImportButton: document.querySelector("#applyImportButton"),
+  sidebarToggle: document.querySelector("#sidebarToggle"),
+  filtersToggle: document.querySelector("#filtersToggle"),
+  detailToggle: document.querySelector("#detailToggle")
 };
 
 applyInitialUrlState();
+const uiState = loadUiState();
 
 const map = L.map("map", {
   zoomControl: false
@@ -83,6 +88,8 @@ L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
 }).addTo(map);
 
 const markerLayer = L.layerGroup().addTo(map);
+
+applyUiState();
 
 requestAnimationFrame(() => map.invalidateSize());
 
@@ -217,6 +224,50 @@ function loadUserState() {
 
 function persistUserState() {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(userState));
+}
+
+function loadUiState() {
+  const mobile = window.matchMedia?.("(max-width: 900px)")?.matches ?? false;
+  const defaults = {
+    sidebarCollapsed: false,
+    filtersCollapsed: mobile,
+    detailCollapsed: mobile
+  };
+  try {
+    return { ...defaults, ...JSON.parse(localStorage.getItem(UI_STATE_KEY)) };
+  } catch {
+    return defaults;
+  }
+}
+
+function persistUiState() {
+  localStorage.setItem(UI_STATE_KEY, JSON.stringify(uiState));
+}
+
+function applyUiState() {
+  document.body.classList.toggle("is-sidebar-collapsed", uiState.sidebarCollapsed);
+  document.body.classList.toggle("is-filters-collapsed", uiState.filtersCollapsed);
+  document.body.classList.toggle("is-detail-collapsed", uiState.detailCollapsed);
+
+  els.sidebarToggle?.setAttribute("aria-label", uiState.sidebarCollapsed ? "一覧を開く" : "一覧を畳む");
+  els.sidebarToggle?.setAttribute("title", uiState.sidebarCollapsed ? "一覧を開く" : "一覧を畳む");
+  els.sidebarToggle?.querySelector("i")?.setAttribute("data-lucide", uiState.sidebarCollapsed ? "panel-left-open" : "panel-left-close");
+
+  els.filtersToggle?.setAttribute("aria-expanded", String(!uiState.filtersCollapsed));
+  els.detailToggle?.setAttribute("aria-label", uiState.detailCollapsed ? "詳細を開く" : "詳細を畳む");
+  els.detailToggle?.setAttribute("title", uiState.detailCollapsed ? "詳細を開く" : "詳細を畳む");
+  els.detailToggle?.querySelector("i")?.setAttribute("data-lucide", uiState.detailCollapsed ? "panel-right-open" : "panel-right-close");
+
+  requestAnimationFrame(() => {
+    map?.invalidateSize();
+    refreshIcons();
+  });
+}
+
+function setUiState(nextState) {
+  Object.assign(uiState, nextState);
+  persistUiState();
+  applyUiState();
 }
 
 function persistShops() {
@@ -917,6 +968,18 @@ function refreshIcons() {
     window.lucide.createIcons();
   }
 }
+
+els.sidebarToggle.addEventListener("click", () => {
+  setUiState({ sidebarCollapsed: !uiState.sidebarCollapsed });
+});
+
+els.filtersToggle.addEventListener("click", () => {
+  setUiState({ filtersCollapsed: !uiState.filtersCollapsed });
+});
+
+els.detailToggle.addEventListener("click", () => {
+  setUiState({ detailCollapsed: !uiState.detailCollapsed });
+});
 
 els.searchInput.addEventListener("input", () => render({ resetList: true }));
 els.datasetSelect.addEventListener("change", () => {

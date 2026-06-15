@@ -25,34 +25,48 @@
     </header>
 
     <main class="app-shell">
+      <button class="edge-toggle sidebar-toggle" id="sidebarToggle" type="button" aria-label="一覧を畳む" title="一覧を畳む">
+        <i data-lucide="panel-left-close"></i>
+      </button>
+
       <aside class="sidebar" aria-label="店舗一覧">
         <section class="filters" aria-label="絞り込み">
-          <label class="search-box">
-            <i data-lucide="search"></i>
-            <input id="searchInput" type="search" placeholder="店名、ジャンル、住所、駅、メモで検索">
-          </label>
+          <button class="section-toggle" id="filtersToggle" type="button" aria-expanded="true" aria-controls="filtersBody">
+            <span>
+              <i data-lucide="sliders-horizontal"></i>
+              検索条件
+            </span>
+            <i data-lucide="chevron-up" class="toggle-chevron"></i>
+          </button>
 
-          <div class="filter-row">
-            <label>
-              <span>データ</span>
-              <select id="datasetSelect"></select>
+          <div class="filters-body" id="filtersBody">
+            <label class="search-box">
+              <i data-lucide="search"></i>
+              <input id="searchInput" type="search" placeholder="店名、ジャンル、住所、駅、メモで検索">
             </label>
-            <label>
-              <span>都道府県</span>
-              <select id="prefectureFilter"></select>
-            </label>
-            <label>
-              <span>市区町村</span>
-              <select id="localityFilter"></select>
-            </label>
-            <label>
-              <span>並び順</span>
-              <select id="sortSelect">
-                <option value="rank">掲載順</option>
-                <option value="name">店名</option>
-                <option value="area">エリア</option>
-              </select>
-            </label>
+
+            <div class="filter-row">
+              <label>
+                <span>データ</span>
+                <select id="datasetSelect"></select>
+              </label>
+              <label>
+                <span>都道府県</span>
+                <select id="prefectureFilter"></select>
+              </label>
+              <label>
+                <span>市区町村</span>
+                <select id="localityFilter"></select>
+              </label>
+              <label>
+                <span>並び順</span>
+                <select id="sortSelect">
+                  <option value="rank">掲載順</option>
+                  <option value="name">店名</option>
+                  <option value="area">エリア</option>
+                </select>
+              </label>
+            </div>
           </div>
         </section>
 
@@ -66,6 +80,10 @@
 
       <section class="map-panel" aria-label="地図と詳細">
         <div id="map" class="map"></div>
+        <button class="detail-toggle" id="detailToggle" type="button" aria-label="詳細を畳む" title="詳細を畳む">
+          <i data-lucide="panel-right-close"></i>
+          <span>詳細</span>
+        </button>
         <article class="detail" id="shopDetail" aria-live="polite"></article>
       </section>
     </main>
